@@ -66,7 +66,7 @@ Streamable HTTP without authentication of its own: bind to a private interface o
 
 ```nix
 # with inputs.webuntis.nixosModules.default imported:
-services.webuntis-mcp = {
+services.webuntis-cli = {
   enable = true;
   listen = "100.64.0.1:8080";
   environmentFile = "/run/secrets/webuntis"; # WEBUNTIS_SERVER=…, WEBUNTIS_SCHOOL=…, …

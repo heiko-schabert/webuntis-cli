@@ -1,4 +1,4 @@
-# NixOS module for webuntis-mcp. Import via the flake's nixosModules.default.
+# NixOS module for webuntis-cli. Import via the flake's nixosModules.default.
 self:
 {
   config,
@@ -7,10 +7,10 @@ self:
   ...
 }:
 let
-  cfg = config.services.webuntis-mcp;
+  cfg = config.services.webuntis-cli;
 in
 {
-  options.services.webuntis-mcp = {
+  options.services.webuntis-cli = {
     enable = lib.mkEnableOption "WebUntis MCP server over HTTP";
     package = lib.mkOption {
       type = lib.types.package;
@@ -37,7 +37,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    systemd.services.webuntis-mcp = {
+    systemd.services.webuntis-cli = {
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
