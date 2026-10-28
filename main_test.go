@@ -15,6 +15,7 @@ import (
 // fakeUntis answers the JSON-RPC methods the tools call.
 func fakeUntis(t *testing.T) *untis.Client {
 	t.Helper()
+
 	results := map[string]string{
 		"getUserData2017": `{"userData":{"elemType":"LEGAL_GUARDIAN","schoolName":"Testschule","children":[{"id":7,"firstName":"Anna"},{"id":8,"firstName":"Ben"}]}}`,
 		"getTimetable2017": `{"masterData":{"timeStamp":1,"subjects":[{"id":1,"name":"M","longName":"Mathe"}],
@@ -30,29 +31,39 @@ func fakeUntis(t *testing.T) *untis.Client {
 			Method string           `json:"method"`
 			Params []map[string]any `json:"params"`
 		}
+
 		json.NewDecoder(r.Body).Decode(&req)
+
 		if req.Params[0]["auth"] == nil {
 			t.Errorf("%s without auth", req.Method)
 		}
+
 		w.Write([]byte(`{"jsonrpc":"2.0","result":` + results[req.Method] + `}`))
 	}))
 	t.Cleanup(srv.Close)
+
 	return untis.New(untis.Config{Server: srv.URL, School: "s", User: "u", Secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"})
 }
 
 func runCLI(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
+
 	var out, errOut bytes.Buffer
+
 	code := run(context.Background(), newServer(fakeUntis(t)), func() error { return nil }, args, &out, &errOut)
+
 	return code, out.String(), errOut.String()
 }
 
 func TestTimetable(t *testing.T) {
 	code, out, errOut := runCLI(t, "timetable", "--child", "ben")
+
 	want := "Wed 2026-10-07\n  08:00-08:45  M                   MUE\n  09:45-10:30  M        R101       SCH  [IRREGULAR, Vertretung, teacher was MUE]\n"
+
 	if code != 0 || !strings.Contains(out, want) {
 		t.Fatalf("exit %d, stderr %q, stdout:\n%s", code, errOut, out)
 	}
+
 	_, out, _ = runCLI(t, "changes", "--json")
 	if strings.Count(out, `"subject": "M"`) != 1 || !strings.Contains(out, `"original_teacher": "MUE"`) {
 		t.Fatalf("changes:\n%s", out)
@@ -76,6 +87,7 @@ func TestClassTimetable(t *testing.T) {
 	if code, out, errOut := runCLI(t, "class-timetable"); code != 0 || !strings.Contains(out, "Class 5a") {
 		t.Fatalf("exit %d, stderr %q, stdout:\n%s", code, errOut, out)
 	}
+
 	if code, _, errOut := runCLI(t, "class-timetable", "--class-name", "9z"); code != 1 || !strings.Contains(errOut, "available: 5a") {
 		t.Fatalf("exit %d, stderr %q", code, errOut)
 	}

@@ -21,6 +21,7 @@ import (
 // modes share one registry.
 func commandName(tool string) string {
 	tool = strings.TrimPrefix(strings.TrimPrefix(tool, "get_"), "list_")
+
 	return strings.ReplaceAll(tool, "_", "-")
 }
 
@@ -38,16 +39,19 @@ type schema struct {
 
 func parseSchema(inputSchema any) (schema, error) {
 	var s schema
+
 	b, err := json.Marshal(inputSchema)
 	if err != nil {
 		return s, err
 	}
+
 	return s, json.Unmarshal(b, &s)
 }
 
 func addFlags(cmd *cobra.Command, s schema) {
 	for name, p := range s.Properties {
 		f := flagName(name)
+
 		switch p.Type {
 		case "integer":
 			cmd.Flags().Int(f, 0, p.Description)
@@ -56,6 +60,7 @@ func addFlags(cmd *cobra.Command, s schema) {
 		default:
 			cmd.Flags().String(f, "", p.Description)
 		}
+
 		if slices.Contains(s.Required, name) {
 			cmd.MarkFlagRequired(f)
 		}
@@ -65,11 +70,13 @@ func addFlags(cmd *cobra.Command, s schema) {
 // toolArgs sends only flags the user set, so tools keep their own defaults.
 func toolArgs(fs *pflag.FlagSet, s schema) map[string]any {
 	in := map[string]any{}
+
 	for name, p := range s.Properties {
 		f := flagName(name)
 		if !fs.Changed(f) {
 			continue
 		}
+
 		switch p.Type {
 		case "integer":
 			in[name], _ = fs.GetInt(f)
@@ -79,6 +86,7 @@ func toolArgs(fs *pflag.FlagSet, s schema) map[string]any {
 			in[name], _ = fs.GetString(f)
 		}
 	}
+
 	return in
 }
 
@@ -87,6 +95,7 @@ func toolCommand(cs *mcp.ClientSession, t *mcp.Tool, ready func() error, jsonOut
 	if err != nil {
 		return nil, err
 	}
+
 	short, _, _ := strings.Cut(t.Description, ". ")
 	cmd := &cobra.Command{
 		Use:   commandName(t.Name),
@@ -97,17 +106,21 @@ func toolCommand(cs *mcp.ClientSession, t *mcp.Tool, ready func() error, jsonOut
 			if err := ready(); err != nil {
 				return err
 			}
+
 			res, err := callTool(cmd.Context(), cs, t.Name, toolArgs(cmd.Flags(), s))
 			if err != nil {
 				return err
 			}
+
 			if f, ok := formatters[t.Name]; ok && !*jsonOut {
 				return format(cmd.OutOrStdout(), res.StructuredContent, f)
 			}
+
 			return printJSON(cmd.OutOrStdout(), res.StructuredContent)
 		},
 	}
 	addFlags(cmd, s)
+
 	return cmd, nil
 }
 
@@ -116,21 +129,28 @@ func toolCommand(cs *mcp.ClientSession, t *mcp.Tool, ready func() error, jsonOut
 func run(ctx context.Context, srv *mcp.Server, ready func() error, args []string, stdout, stderr io.Writer) int {
 	fail := func(err error) int {
 		fmt.Fprintln(stderr, err)
+
 		return 1
 	}
+
 	ct, st := mcp.NewInMemoryTransports()
+
 	if _, err := srv.Connect(ctx, st, nil); err != nil {
 		return fail(err)
 	}
+
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "webuntis-cli"}, nil).Connect(ctx, ct, nil)
 	if err != nil {
 		return fail(err)
 	}
+
 	defer cs.Close()
+
 	tools, err := cs.ListTools(ctx, nil)
 	if err != nil {
 		return fail(err)
 	}
+
 	root := &cobra.Command{
 		Use:   "webuntis-cli",
 		Short: "WebUntis timetable, homework and exams from the terminal",
@@ -147,25 +167,36 @@ Credentials: WEBUNTIS_SERVER, WEBUNTIS_SCHOOL, WEBUNTIS_USERNAME, WEBUNTIS_SECRE
 	if level == "" {
 		level = "warn"
 	}
+
 	root.PersistentFlags().StringVar(&level, "log-level", level, "debug, info, warn or error (env WEBUNTIS_LOG_LEVEL)")
 	root.PersistentPreRunE = func(*cobra.Command, []string) error {
 		var l slog.Level
-		if err := l.UnmarshalText([]byte(level)); err != nil {
+
+		err := l.UnmarshalText([]byte(level))
+		if err != nil {
 			return fmt.Errorf("--log-level: %w", err)
 		}
+
 		slog.SetDefault(slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: l})))
+
 		return nil
 	}
+
 	var jsonOut bool
+
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "print the raw JSON result instead of text")
+
 	for _, t := range tools.Tools {
 		cmd, err := toolCommand(cs, t, ready, &jsonOut)
 		if err != nil {
 			return fail(err)
 		}
+
 		root.AddCommand(cmd)
 	}
+
 	var addr string
+
 	mcpCmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "MCP server for AI assistants (stdio or HTTP)",
@@ -174,13 +205,17 @@ Streamable HTTP. HTTP mode has no authentication of its own: bind it to a
 private interface only, e.g. the Tailscale IP.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := ready(); err != nil {
+			err := ready()
+			if err != nil {
 				return err
 			}
+
 			if addr == "" {
 				return srv.Run(cmd.Context(), &mcp.StdioTransport{})
 			}
+
 			slog.InfoContext(cmd.Context(), "serving MCP over HTTP", "addr", addr)
+
 			return http.ListenAndServe(addr, httpHandler(srv))
 		},
 	}
@@ -189,9 +224,11 @@ private interface only, e.g. the Tailscale IP.`,
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
+
 	if err := root.ExecuteContext(ctx); err != nil {
 		return fail(err)
 	}
+
 	return 0
 }
 
@@ -205,15 +242,19 @@ func callTool(ctx context.Context, cs *mcp.ClientSession, name string, args map[
 	if err != nil {
 		return nil, err
 	}
+
 	if res.IsError {
 		var msgs []string
+
 		for _, c := range res.Content {
 			if tc, ok := c.(*mcp.TextContent); ok {
 				msgs = append(msgs, tc.Text)
 			}
 		}
+
 		return nil, errors.New(strings.Join(msgs, "\n"))
 	}
+
 	return res, nil
 }
 
@@ -222,6 +263,8 @@ func printJSON(w io.Writer, v any) error {
 	if err != nil {
 		return err
 	}
+
 	fmt.Fprintln(w, string(b))
+
 	return nil
 }

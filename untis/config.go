@@ -25,29 +25,35 @@ func DefaultEnvFile() string {
 		home, _ := os.UserHomeDir()
 		dir = filepath.Join(home, ".config")
 	}
+
 	return filepath.Join(dir, "webuntis", "env")
 }
 
 // LoadConfig prefers env vars over the file so an MCP client config can override it.
 func LoadConfig(getenv func(string) string, envFile string) (Config, error) {
 	file := map[string]string{}
+
 	b, err := os.ReadFile(envFile)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return Config{}, err
 	}
-	for _, line := range strings.Split(string(b), "\n") {
+
+	for line := range strings.SplitSeq(string(b), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+
 		if k, v, ok := strings.Cut(line, "="); ok {
 			file[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"'`)
 		}
 	}
+
 	get := func(k string) string {
 		if v := getenv(k); v != "" {
 			return v
 		}
+
 		return file[k]
 	}
 	c := Config{
@@ -57,15 +63,20 @@ func LoadConfig(getenv func(string) string, envFile string) (Config, error) {
 		Secret:  get("WEBUNTIS_SECRET"),
 		Student: get("WEBUNTIS_STUDENT"),
 	}
+
 	var missing []string
+
 	for k, v := range map[string]string{"WEBUNTIS_SERVER": c.Server, "WEBUNTIS_SCHOOL": c.School, "WEBUNTIS_USERNAME": c.User, "WEBUNTIS_SECRET": c.Secret} {
 		if v == "" {
 			missing = append(missing, k)
 		}
 	}
+
 	if len(missing) > 0 {
 		slices.Sort(missing)
+
 		return Config{}, fmt.Errorf("missing config: %s (environment or %s)", strings.Join(missing, ", "), envFile)
 	}
+
 	return c, nil
 }

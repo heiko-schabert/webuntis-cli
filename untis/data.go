@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -11,23 +12,30 @@ import (
 	"time"
 )
 
+// ErrNoMasterData means WebUntis answered without the lookup tables needed to name subjects, rooms and teachers.
+var ErrNoMasterData = errors.New("WebUntis sent no master data")
+
 const day = "2006-01-02"
 
 // ParseDate reads YYYY-MM-DD; empty means today.
 func ParseDate(s string) (time.Time, error) {
 	if s == "" {
 		y, m, d := time.Now().Date()
+
 		return time.Date(y, m, d, 0, 0, 0, 0, time.Local), nil
 	}
+
 	t, err := time.ParseInLocation(day, s, time.Local)
 	if err != nil {
 		return t, fmt.Errorf("date %q: want YYYY-MM-DD", s)
 	}
+
 	return t, nil
 }
 
 func ymdInt(t time.Time) int {
 	n, _ := strconv.Atoi(t.Format("20060102"))
+
 	return n
 }
 
@@ -39,7 +47,9 @@ func (d *ymd) UnmarshalJSON(b []byte) error {
 	if len(s) == 8 && !strings.Contains(s, "-") {
 		s = s[:4] + "-" + s[4:6] + "-" + s[6:]
 	}
+
 	*d = ymd(s)
+
 	return nil
 }
 
@@ -52,7 +62,9 @@ func (h *hhmm) UnmarshalJSON(b []byte) error {
 		s = fmt.Sprintf("%04s", s)
 		s = s[:2] + ":" + s[2:]
 	}
+
 	*h = hhmm(s)
+
 	return nil
 }
 
@@ -62,10 +74,12 @@ type stamp struct{ Date, Time string }
 
 func (s *stamp) UnmarshalJSON(b []byte) error {
 	v := strings.TrimSuffix(strings.Trim(string(b), `"`), "Z")
+
 	s.Date, s.Time, _ = strings.Cut(v, "T")
 	if len(s.Time) > 5 {
 		s.Time = s.Time[:5]
 	}
+
 	return nil
 }
 
@@ -108,6 +122,7 @@ func find(es []element, id int) element {
 			return e
 		}
 	}
+
 	return element{}
 }
 
@@ -134,12 +149,14 @@ func (c *Client) timetable(ctx context.Context, id int, typ string, start, end t
 	c.mu.Lock()
 	ts := c.masterTS
 	c.mu.Unlock()
+
 	var r struct {
 		MasterData masterData `json:"masterData"`
 		Timetable  struct {
 			Periods []rawPeriod `json:"periods"`
 		} `json:"timetable"`
 	}
+
 	err := c.rpc(ctx, "getTimetable2017", map[string]any{
 		"id": id, "type": typ, "startDate": ymdInt(start), "endDate": ymdInt(end),
 		"masterDataTimestamp": ts, "timetableTimestamp": 0, "timetableTimestamps": []int{},
@@ -147,12 +164,14 @@ func (c *Client) timetable(ctx context.Context, id int, typ string, start, end t
 	if err != nil {
 		return nil, nil, err
 	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// Untis only resends master data when it changed since ts.
 	if len(r.MasterData.Subjects) > 0 {
 		c.master, c.masterTS = &r.MasterData, r.MasterData.TimeStamp
 	}
+
 	return r.Timetable.Periods, c.master, nil
 }
 
@@ -160,14 +179,18 @@ func (c *Client) masterData(ctx context.Context, kid Child) (*masterData, error)
 	c.mu.Lock()
 	md := c.master
 	c.mu.Unlock()
+
 	if md != nil {
 		return md, nil
 	}
+
 	today, _ := ParseDate("")
+
 	_, md, err := c.timetable(ctx, kid.ID, "STUDENT", today, today)
 	if err == nil && md == nil {
-		err = fmt.Errorf("WebUntis sent no master data")
+		err = ErrNoMasterData
 	}
+
 	return md, err
 }
 
@@ -204,38 +227,50 @@ func lessons(ps []rawPeriod, md *masterData) []Lesson {
 	if md == nil {
 		md = &masterData{}
 	}
+
 	out := []Lesson{}
+
 	for _, p := range ps {
-		l := Lesson{Date: p.Start.Date, Start: p.Start.Time, End: p.End.Time, Group: p.SG,
-			Substitution: p.Text.Substitution, LessonText: p.Text.Lesson, Info: p.Text.Info}
+		lesson := Lesson{
+			Date: p.Start.Date, Start: p.Start.Time, End: p.End.Time, Group: p.SG,
+			Substitution: p.Text.Substitution, LessonText: p.Text.Lesson, Info: p.Text.Info,
+			// Filled from p.Elements below.
+			Subject: "", SubjectLong: "", Room: "", Teacher: "", Class: "", Status: "",
+			OriginalRoom: "", OriginalTeacher: "",
+		}
+
 		for _, e := range p.Elements {
 			switch e.Type {
 			case "SUBJECT":
 				s := find(md.Subjects, e.ID)
-				l.Subject, l.SubjectLong = s.Name, s.LongName
+				lesson.Subject, lesson.SubjectLong = s.Name, s.LongName
 			case "TEACHER":
-				l.Teacher = find(md.Teachers, e.ID).Name
+				lesson.Teacher = find(md.Teachers, e.ID).Name
 				if e.OrgID != 0 && e.OrgID != e.ID {
-					l.OriginalTeacher = find(md.Teachers, e.OrgID).Name
+					lesson.OriginalTeacher = find(md.Teachers, e.OrgID).Name
 				}
 			case "ROOM":
-				l.Room = find(md.Rooms, e.ID).Name
+				lesson.Room = find(md.Rooms, e.ID).Name
 				if e.OrgID != 0 && e.OrgID != e.ID {
-					l.OriginalRoom = find(md.Rooms, e.OrgID).Name
+					lesson.OriginalRoom = find(md.Rooms, e.OrgID).Name
 				}
 			case "CLASS":
-				l.Class = find(md.Klassen, e.ID).Name
+				lesson.Class = find(md.Klassen, e.ID).Name
 			}
 		}
+
 		switch {
 		case slices.Contains(p.Is, "CANCELLED"):
-			l.Status = "cancelled"
+			lesson.Status = "cancelled"
 		case slices.Contains(p.Is, "IRREGULAR"):
-			l.Status = "irregular"
+			lesson.Status = "irregular"
 		}
-		out = append(out, l)
+
+		out = append(out, lesson)
 	}
+
 	slices.SortFunc(out, func(a, b Lesson) int { return cmp.Or(cmp.Compare(a.Date, b.Date), cmp.Compare(a.Start, b.Start)) })
+
 	return out
 }
 
@@ -245,7 +280,9 @@ func (c *Client) Timetable(ctx context.Context, child string, start, end time.Ti
 	if err != nil {
 		return nil, err
 	}
+
 	ps, md, err := c.timetable(ctx, kid.ID, "STUDENT", start, end)
+
 	return lessons(ps, md), err
 }
 
@@ -255,10 +292,12 @@ func (c *Client) studentClass(ctx context.Context, kid Child) (element, error) {
 	for d.Weekday() == time.Saturday || d.Weekday() == time.Sunday {
 		d = d.AddDate(0, 0, 1)
 	}
+
 	ps, md, err := c.timetable(ctx, kid.ID, "STUDENT", d, d.AddDate(0, 0, 4))
 	if err != nil {
 		return element{}, err
 	}
+
 	for _, p := range ps {
 		for _, e := range p.Elements {
 			if e.Type == "CLASS" && md != nil {
@@ -268,6 +307,7 @@ func (c *Client) studentClass(ctx context.Context, kid Child) (element, error) {
 			}
 		}
 	}
+
 	return element{}, fmt.Errorf("could not determine the class of %s, pass class_name", kid.FirstName)
 }
 
@@ -277,16 +317,20 @@ func (c *Client) ClassTimetable(ctx context.Context, child, name string, start, 
 	if err != nil {
 		return Timetable{}, err
 	}
+
 	var k element
 	if name = strings.TrimSpace(name); name == "" {
 		k, err = c.studentClass(ctx, kid)
 	} else {
 		k, err = c.class(ctx, kid, name)
 	}
+
 	if err != nil {
 		return Timetable{}, err
 	}
+
 	ps, md, err := c.timetable(ctx, k.ID, "CLASS", start, end)
+
 	return Timetable{Title: "Class " + k.Name, Lessons: lessons(ps, md)}, err
 }
 
@@ -295,14 +339,19 @@ func (c *Client) class(ctx context.Context, kid Child, name string) (element, er
 	if err != nil {
 		return element{}, err
 	}
+
 	var names []string
+
 	for _, k := range md.Klassen {
 		if strings.EqualFold(k.Name, name) {
 			return k, nil
 		}
+
 		names = append(names, k.Name)
 	}
+
 	slices.Sort(names)
+
 	return element{}, fmt.Errorf("class %q not found, available: %s", name, strings.Join(slices.Compact(names), ", "))
 }
 
@@ -321,17 +370,22 @@ func (c *Client) Classes(ctx context.Context, child string) (Classes, error) {
 	if err != nil {
 		return Classes{}, err
 	}
+
 	md, err := c.masterData(ctx, kid)
 	if err != nil {
 		return Classes{}, err
 	}
+
 	out := Classes{Classes: []Class{}}
+
 	for _, k := range md.Klassen {
 		if k.Active == nil || *k.Active {
 			out.Classes = append(out.Classes, Class{k.Name, k.LongName})
 		}
 	}
+
 	slices.SortFunc(out.Classes, func(a, b Class) int { return cmp.Compare(a.Name, b.Name) })
+
 	return out, nil
 }
 
@@ -354,11 +408,14 @@ func (c *Client) Homework(ctx context.Context, child string, days int) (Homework
 	if err != nil {
 		return HomeworkList{}, err
 	}
+
 	md, err := c.masterData(ctx, kid)
 	if err != nil {
 		return HomeworkList{}, err
 	}
+
 	start, _ := ParseDate("")
+
 	type lesson struct {
 		ID         int    `json:"id"`
 		Subject    string `json:"subject"`
@@ -377,30 +434,41 @@ func (c *Client) Homework(ctx context.Context, child string, days int) (Homework
 		Lessons     []lesson          `json:"lessons"`
 		LessonsByID map[string]lesson `json:"lessonsById"`
 	}
+
 	if err := c.rpc(ctx, "getHomeWork2017", map[string]any{
 		"id": kid.ID, "type": "STUDENT", "startDate": ymdInt(start), "endDate": ymdInt(start.AddDate(0, 0, days)),
 	}, &r); err != nil {
 		return HomeworkList{}, err
 	}
+
 	for _, l := range r.Lessons {
 		if r.LessonsByID == nil {
 			r.LessonsByID = map[string]lesson{}
 		}
+
 		r.LessonsByID[strconv.Itoa(l.ID)] = l
 	}
+
 	out := HomeworkList{Homework: []Homework{}}
+
 	for _, h := range r.HomeWorks {
 		l := r.LessonsByID[strconv.Itoa(h.LessonID)]
+
 		hw := Homework{Assigned: string(h.StartDate), Due: string(h.EndDate), Subject: l.Subject, Text: h.Text, Completed: h.Completed}
+
 		if s := find(md.Subjects, l.SubjectID).Name; s != "" {
 			hw.Subject = s
 		}
+
 		if len(l.TeacherIDs) > 0 {
 			hw.Teacher = find(md.Teachers, l.TeacherIDs[0]).Name
 		}
+
 		out.Homework = append(out.Homework, hw)
 	}
+
 	slices.SortFunc(out.Homework, func(a, b Homework) int { return cmp.Compare(a.Due, b.Due) })
+
 	return out, nil
 }
 
@@ -426,11 +494,14 @@ func (c *Client) Exams(ctx context.Context, child string, days int) (Exams, erro
 	if err != nil {
 		return Exams{}, err
 	}
+
 	md, err := c.masterData(ctx, kid)
 	if err != nil {
 		return Exams{}, err
 	}
+
 	start, _ := ParseDate("")
+
 	var r struct {
 		Exams []struct {
 			ExamType   string `json:"examType"`
@@ -443,24 +514,33 @@ func (c *Client) Exams(ctx context.Context, child string, days int) (Exams, erro
 			Text       string `json:"text"`
 		} `json:"exams"`
 	}
+
 	if err := c.rpc(ctx, "getExams2017", map[string]any{
 		"id": kid.ID, "type": "STUDENT", "startDate": ymdInt(start), "endDate": ymdInt(start.AddDate(0, 0, days)),
 	}, &r); err != nil {
 		return Exams{}, err
 	}
+
 	names := func(es []element, ids []int) (out []string) {
 		for _, id := range ids {
 			out = append(out, find(es, id).Name)
 		}
+
 		return out
 	}
+
 	out := Exams{Exams: []Exam{}}
+
 	for _, e := range r.Exams {
-		out.Exams = append(out.Exams, Exam{Date: e.Start.Date, Start: e.Start.Time, End: e.End.Time,
+		out.Exams = append(out.Exams, Exam{
+			Date: e.Start.Date, Start: e.Start.Time, End: e.End.Time,
 			Subject: find(md.Subjects, e.SubjectID).Name, Type: e.ExamType, Name: e.Name, Text: e.Text,
-			Teachers: names(md.Teachers, e.TeacherIDs), Rooms: names(md.Rooms, e.RoomIDs)})
+			Teachers: names(md.Teachers, e.TeacherIDs), Rooms: names(md.Rooms, e.RoomIDs),
+		})
 	}
+
 	slices.SortFunc(out.Exams, func(a, b Exam) int { return cmp.Or(cmp.Compare(a.Date, b.Date), cmp.Compare(a.Start, b.Start)) })
+
 	return out, nil
 }
 
@@ -488,18 +568,22 @@ func (c *Client) Absences(ctx context.Context, start, end time.Time) (Absences, 
 		if err != nil {
 			return Absences{}, err
 		}
+
 		md, err := c.masterData(ctx, kids[0])
 		if err != nil {
 			return Absences{}, err
 		}
+
 		sy := schoolYear(md)
 		if start.IsZero() {
 			start, _ = ParseDate(string(sy.StartDate))
 		}
+
 		if end.IsZero() {
 			end, _ = ParseDate(string(sy.EndDate))
 		}
 	}
+
 	var r struct {
 		Absences []struct {
 			StudentName string `json:"studentName"`
@@ -513,26 +597,36 @@ func (c *Client) Absences(ctx context.Context, start, end time.Time) (Absences, 
 			} `json:"excuse"`
 		} `json:"absences"`
 	}
-	if err := c.rpc(ctx, "getStudentAbsences2017", map[string]any{
+
+	err := c.rpc(ctx, "getStudentAbsences2017", map[string]any{
 		"startDate": ymdInt(start), "endDate": ymdInt(end), "includeExcused": true, "includeUnExcused": true,
-	}, &r); err != nil {
+	}, &r)
+	if err != nil {
 		return Absences{}, err
 	}
+
 	out := Absences{Absences: []Absence{}}
+
 	for _, a := range r.Absences {
 		status := "not excused"
+
 		switch {
 		case a.Excused:
 			status = "excused"
 		case a.Excuse != nil && a.Excuse.Text != "":
 			status = a.Excuse.Text
 		}
-		out.Absences = append(out.Absences, Absence{Student: a.StudentName, StartDate: a.Start.Date, Start: a.Start.Time,
-			EndDate: a.End.Date, End: a.End.Time, Reason: a.Reason, Excused: a.Excused, Status: status, Note: a.Text})
+
+		out.Absences = append(out.Absences, Absence{
+			Student: a.StudentName, StartDate: a.Start.Date, Start: a.Start.Time,
+			EndDate: a.End.Date, End: a.End.Time, Reason: a.Reason, Excused: a.Excused, Status: status, Note: a.Text,
+		})
 	}
+
 	slices.SortFunc(out.Absences, func(a, b Absence) int {
 		return cmp.Or(cmp.Compare(a.StartDate, b.StartDate), cmp.Compare(a.Start, b.Start))
 	})
+
 	return out, nil
 }
 
@@ -544,9 +638,11 @@ func schoolYear(md *masterData) span {
 			return sy
 		}
 	}
+
 	if n := len(md.Schoolyears); n > 0 {
 		return md.Schoolyears[n-1]
 	}
+
 	return span{}
 }
 
@@ -570,21 +666,29 @@ func (c *Client) Messages(ctx context.Context, d time.Time) (Messages, error) {
 			Attachments []json.RawMessage `json:"attachments"`
 		} `json:"messages"`
 	}
-	if err := c.rpc(ctx, "getMessagesOfDay2017", map[string]any{"date": ymdInt(d)}, &r); err != nil {
+
+	err := c.rpc(ctx, "getMessagesOfDay2017", map[string]any{"date": ymdInt(d)}, &r)
+	if err != nil {
 		return Messages{}, err
 	}
+
 	out := Messages{Date: d.Format(day), Messages: []Message{}}
+
 	for _, m := range r.Messages {
 		msg := Message{Subject: m.Subject, Body: strings.TrimSpace(m.Body)}
+
 		for _, a := range m.Attachments {
 			var v struct{ Name, URL string }
 			if json.Unmarshal(a, &v) != nil {
 				json.Unmarshal(a, &v.Name) // plain string
 			}
+
 			msg.Attachments = append(msg.Attachments, cmp.Or(v.Name, v.URL))
 		}
+
 		out.Messages = append(out.Messages, msg)
 	}
+
 	return out, nil
 }
 
@@ -616,34 +720,44 @@ func (c *Client) SchoolInfo(ctx context.Context, child string) (SchoolInfo, erro
 	if err != nil {
 		return SchoolInfo{}, err
 	}
+
 	md, err := c.masterData(ctx, kid)
 	if err != nil {
 		return SchoolInfo{}, err
 	}
+
 	u, err := c.userData(ctx)
 	if err != nil {
 		return SchoolInfo{}, err
 	}
+
 	sy := schoolYear(md)
-	info := SchoolInfo{School: cmp.Or(u.SchoolName, c.cfg.School), SchoolYear: sy.Name, Student: kid.FirstName,
-		Periods: []Period{}, Holidays: []Holiday{}}
+	info := SchoolInfo{
+		School: cmp.Or(u.SchoolName, c.cfg.School), SchoolYear: sy.Name, Student: kid.FirstName,
+		Periods: []Period{}, Holidays: []Holiday{}, Class: "", LastImport: "",
+	}
 	// Class is a nicety; holidays have no lessons to read it from.
 	if k, err := c.studentClass(ctx, kid); err == nil {
 		info.Class = k.Name
 	}
+
 	if md.TimeStamp > 0 {
 		info.LastImport = time.UnixMilli(md.TimeStamp).Format("2006-01-02 15:04")
 	}
+
 	if len(md.TimeGrid.Days) > 0 {
 		for i, u := range md.TimeGrid.Days[0].Units {
 			info.Periods = append(info.Periods, Period{cmp.Or(u.Label, strconv.Itoa(i+1)), string(u.StartTime), string(u.EndTime)})
 		}
 	}
+
 	for _, h := range md.Holidays {
 		if sy.Name == "" || (sy.StartDate <= h.StartDate && h.StartDate <= sy.EndDate) {
 			info.Holidays = append(info.Holidays, Holiday{h.LongName, string(h.StartDate), string(h.EndDate)})
 		}
 	}
+
 	slices.SortFunc(info.Holidays, func(a, b Holiday) int { return cmp.Compare(a.Start, b.Start) })
+
 	return info, nil
 }
