@@ -159,6 +159,7 @@ func run(ctx context.Context, srv *mcp.Server, ready func() error, args []string
 Credentials: WEBUNTIS_SERVER, WEBUNTIS_SCHOOL, WEBUNTIS_USERNAME, WEBUNTIS_SECRET
 (optional WEBUNTIS_STUDENT) as environment variables or in ~/.config/webuntis/env.`,
 		Example:       "  webuntis-cli tomorrow\n  webuntis-cli changes --json | jq '.lessons[] | {date, subject, status}'",
+		Version:       versionString(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

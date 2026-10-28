@@ -8,11 +8,28 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"runtime/debug"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"webuntis-cli/untis"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// version is set by the Nix build via -ldflags -X; go install fills it from build info.
+var version string
+
+func versionString() string {
+	if version != "" {
+		return version
+	}
+
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		return bi.Main.Version
+	}
+
+	return "(devel)"
+}
 
 type none struct{}
 
@@ -93,7 +110,7 @@ func schoolDay(d time.Time) time.Time {
 }
 
 func newServer(c *untis.Client) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "webuntis", Version: "v0.1.0"}, nil)
+	s := mcp.NewServer(&mcp.Implementation{Name: "webuntis", Version: versionString()}, nil)
 	day := func(ctx context.Context, child, title string, d time.Time) (untis.Timetable, error) {
 		ls, err := c.Timetable(ctx, child, d, d)
 
