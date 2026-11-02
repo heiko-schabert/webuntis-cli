@@ -1,6 +1,6 @@
 module webuntis-cli
 
-go 1.26.7
+go 1.27.3
 
 require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
