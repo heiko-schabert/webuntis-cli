@@ -2,7 +2,7 @@ version: "2"
 linters:
   default: all
   disable:
-    - depguard # no dependency policy; default list blocks this module's own dot-less path
+    - depguard # no dependency policy; the default rule allows only the standard library
     - funlen
     - gochecknoglobals
     - gochecknoinits

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"webuntis-cli/untis"
+	"github.com/heiko-schabert/webuntis-cli/untis"
 )
 
 // formatters render a tool's structured result for humans; tools without one

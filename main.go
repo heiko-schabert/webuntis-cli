@@ -11,8 +11,7 @@ import (
 	"runtime/debug"
 	"time"
 
-	"webuntis-cli/untis"
-
+	"github.com/heiko-schabert/webuntis-cli/untis"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
