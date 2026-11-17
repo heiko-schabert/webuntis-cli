@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"webuntis-cli/untis"
+	"github.com/heiko-schabert/webuntis-cli/untis"
 )
 
 // fakeUntis answers the JSON-RPC methods the tools call.

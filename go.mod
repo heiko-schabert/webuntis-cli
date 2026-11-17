@@ -1,4 +1,4 @@
-module webuntis-cli
+module github.com/heiko-schabert/webuntis-cli
 
 go 1.27.3
 

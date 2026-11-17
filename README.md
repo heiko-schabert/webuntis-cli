@@ -7,9 +7,12 @@ Go port of [webuntis-mcp](https://github.com/toughIQ/webuntis-mcp). It uses the 
 ## Install
 
 ```bash
-go install .
-nix profile install .   # or: nix build, nix run . -- today
+go install github.com/heiko-schabert/webuntis-cli@latest
+mise use -g go:github.com/heiko-schabert/webuntis-cli@latest
+nix profile install github:heiko-schabert/webuntis-cli   # or: nix run github:heiko-schabert/webuntis-cli -- today
 ```
+
+From a checkout: `go install .` or `nix profile install .`.
 
 `devenv shell` (or direnv) provides Go and goimports. After changing Go dependencies, run `nix run .#vendor-hash` to update `go.mod.sri`, the flake's vendor hash.
 
@@ -51,6 +54,8 @@ Untis restricts some methods per account type; e.g. student accounts get `WebUnt
 ```bash
 claude mcp add -s user webuntis -- ~/go/bin/webuntis-cli mcp
 ```
+
+With mise, use the path from `mise which webuntis-cli` instead of `~/go/bin/webuntis-cli`.
 
 Tools: `check_login`, `list_children`, `get_timetable`, `get_today`, `get_tomorrow`, `get_changes`, `get_class_timetable`, `list_classes`, `get_homework`, `get_exams`, `get_absences`, `get_messages`, `get_school_info`.
 
